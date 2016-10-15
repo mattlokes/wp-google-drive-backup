@@ -1,0 +1,84 @@
+#!/bin/bash
+
+#############################################################
+# Script to Backup Wordpress Content/Database to Google Drive
+#############################################################
+# Requires:
+#         - gdrive  (https://github.com/prasmussen/gdrive)
+#
+# Steps to Setup:
+#         1. Find Google Drive Directory Parent ID to backup to and set BACKUP_DIR_GDRIVE_ID below
+#             "  gdrive list -m 200000 | grep <DIRECTORY_NAME> | awk '{print $1}'  "
+#         2. Choose a Directory for script to perform in and set SCRATCH_DIR_PATH below,
+#            all files except logs will be removed at the end
+#         3. Choose the maximum number of backups to leave on Google Drive set MAX_BACKUP_NUM below,
+#            oldest backup will be deleted after maximum reached.
+#         4. Set SITE_NAMES array to contain all websites to be backed up, this site name must be the database name
+#            and part of directory name where the site's root /var/www/ lives.
+#         5. Set MYSQLUSER & MYSQLPASS as your mySQL user credentials.
+#         6. Add to Crontab: e.g "0 4 * * 1 <PATH_TO_SCRIPT>/wp_backup_gdrive"
+#         7. Change Permission to execute only, to stop password being read e.g "chmod 111 wp_backup_gdrive"
+#         8. Profit!
+
+############################################################
+# CONFIG
+############################################################
+
+MAX_BACKUP_NUM=<<CHANGME>>
+BACKUP_DIR_GDRIVE_ID=<<CHANGEME>>
+SCRATCH_DIR_PATH=<<CHANGEME>>
+declare -a SITE_NAMES=("<<CHANGEME>>" "<<CHANGEME>>")
+MYSQLUSER=<<CHANGEME>>
+MYSQLPASS=<<CHANGEME>>
+
+###########################################################
+timestamp=`date +%Y_%m_%d__%H%M`
+
+#Jump to scratch directory redirect standard out to log
+cd "$SCRATCH_DIR_PATH"
+exec > >(tee -i "site_backup_gdrive_${timestamp}.log")
+
+for site in "${SITE_NAMES[@]}"
+do
+   sitedir=`ls /var/www | grep "$site"`
+   sitebakdir="backup_${site}_${timestamp}"
+
+   mkdir "$sitebakdir"
+   echo "Created... $sitebakdir"
+   cd "$sitebakdir"
+
+   # Backup Wordpress Databases
+   mysqldump -u "$MYSQLUSER" -p"$MYSQLPASS" "$site" > "$site.sql"
+   echo "mySQL database backed up... $site.sql"
+
+   # Backup Wordpress Content
+   tar czf "$sitedir.tar.gz" "/var/www/$sitedir"
+   echo "Wordpress Content Backed up... $sitedir.tar.gz"
+
+   # Tar Content
+   cd ..
+   tar czf "$sitebakdir.tar.gz" "$sitebakdir"
+
+   # Ensure Tar exists if it does, remove directory 
+   if [ -f "$sitebakdir.tar.gz" ]
+   then
+      echo "Full Site Backup Compressed... $sitebakdir.tar.gz"
+      #Remove Directory
+      rm -r $sitebakdir
+
+      #Remove oldest Google Drive Backup
+      oldestbak_gd_entry_num=`/usr/local/bin/gdrive list --order createdTime --name-width 0 -m 20000 | grep "backup_${site}" | wc -l`
+      if [ $oldestbak_gd_entry_num -ge $MAX_BACKUP_NUM ]
+      then
+         oldestbak_gd_entry=`/usr/local/bin/gdrive list --order createdTime --name-width 0 -m 20000 | grep -m 1 "backup_${site}"`
+         oldestbak_gd_id=`echo "$oldestbak_gd_entry" | awk '{print $1}'`
+         /usr/local/bin/gdrive delete "$oldestbak_gd_id"
+         echo "Removed Oldest Backup..."
+         echo "$oldestbak_gd_entry"
+      fi
+
+      #Upload to Google Drive (Magic number is my Backup Directory ID)
+      /usr/local/bin/gdrive upload --delete -p "$BACKUP_DIR_GDRIVE_ID" "$sitebakdir.tar.gz"
+      echo "Uploaded to Google Drive... $sitebakdir.tar.gz"
+   fi
+done
