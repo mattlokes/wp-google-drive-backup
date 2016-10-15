@@ -24,7 +24,7 @@
 # CONFIG
 ############################################################
 
-MAX_BACKUP_NUM=<<CHANGME>>
+MAX_BACKUP_NUM=<<CHANGEME>>
 BACKUP_DIR_GDRIVE_ID=<<CHANGEME>>
 SCRATCH_DIR_PATH=<<CHANGEME>>
 declare -a SITE_NAMES=("<<CHANGEME>>" "<<CHANGEME>>")
